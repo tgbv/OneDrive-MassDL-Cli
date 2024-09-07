@@ -20,7 +20,7 @@ parser.add_argument('-f', '--force-dirs', action='store_true', help='crawls thro
 args = parser.parse_args()
 
 def download_onedrive_folder(authkey, id, cid, folder):
-
+    print(authkey, id, cid, folder)
     data = {
         'gb': '0,1,2',
         'd': 1,
@@ -36,8 +36,13 @@ def download_onedrive_folder(authkey, id, cid, folder):
     }
 
     for count in itertools.count(data['ps'], data['ps']):
-        response = requests.get('https://skyapi.onedrive.live.com/API/2/GetItems', params=data, headers=headers)
-        response.raise_for_status()
+        try:
+            response = requests.get('https://skyapi.onedrive.live.com/API/2/GetItems', params=data, headers=headers)
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            print(e)
+            print(e.response.text)
+            exit()
         for item in response.json()['items']:
             if 'folder' in item:
                 for child in item['folder']['children']:
@@ -78,6 +83,19 @@ def download_onedrive_folder(authkey, id, cid, folder):
                 else:
                     return
 
+def _fetch_root_dir_absolute_id(cid):
+    response = requests.get("https://api.onedrive.com/v1.0/drives/"+cid+"/items/root")
+    response.raise_for_status()
+    return response.json()['id']
+
+def download_children_of_root_folder(authkey, cid, folder):
+    # fetch children of root folder
+    response = requests.get("https://api.onedrive.com/v1.0/drives/"+cid[0]+"/items/root/children?authkey="+authkey+"&cid="+cid[0])
+    response.raise_for_status()
+
+    for item in response.json()['value']:
+        download_onedrive_folder(authkey, item['id'], cid, folder)
+
 
 cur.execute('''CREATE TABLE IF NOT EXISTS download(
     id TEXT NOT NULL PRIMARY KEY,
@@ -92,5 +110,10 @@ data = {
     'id': urllib.parse.unquote(params['id'][0]),
     'cid': params['cid']
 }
-download_onedrive_folder(data['authKey'], data['id'], data['cid'], 'downloads')
 
+# root folders don't always have access permissions
+# i treat them differently
+if data['id'] == 'root':
+    download_children_of_root_folder(data['authKey'], data['cid'], 'downloads')
+else:
+    download_onedrive_folder(data['authKey'], data['id'], data['cid'], 'downloads')
